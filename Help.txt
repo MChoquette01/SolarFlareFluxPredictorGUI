@@ -1,0 +1,45 @@
+Top: XRSA and XRSB flux are graphed over the last 50 minutes. All times are given in UTC.
+
+The app operates in one of three modes at any given time.
+
+Warmup: This mode is called at the start of the application and only runs once. It will acquire data from the most recent eight minutes in order to begin making predictions. Once it retrieves the first live datum, Standby mode is activated.
+
+Standby: Predictions for 5, 4 and 3 minutes before flare start are displayed. The current timestamp is assumed to be 2 minutes before the start of a flare. If the XRSB increases from the previous prediction, the next prediction is made assuming there is one minute until flare start, else the next prediction will be again at -2. If the next datum has further increased XRSB, a prediction is made at t=0 - the start of a flare!
+
+Flare: A live flare is underway - predictions will be made for 1 - 15 minutes after flare start as data arrives. After the 15 minute prediction, artifacts are saved and the app returns to standby mode.
+
+Below the graph are 3 panels. The leftmost shows live predictions while in standby mode. This is shown as a table with the most recent data entry at the top. Columns are'
+-Model: Minutes since the start of a flare - each model is trained on a specific minute
+-Prediction: A binary classification of whether maximum flux in 8-14 minutes will be less than or greater than or equal to C5.
+-<C5: Probability the maximum XRSB flux 8-14 minutes out will be less than C5.
+->=C5: Probability the maximum XRSB flux 8-14 minutes out will be greater than C5 but less than M.
+-M: Probability the maximum XRSB flux 8-14 minutes out will be M level but less than X.
+-X: Probability the maximum XRSB flux 8-14 minutes out will be X level.
+-Duration: Amount of time since the start of the flare. If data latency is higher than usual - this will not match the model number.
+
+The middle panel shows the full predictions (5 minutes before to 15 minutes after) for the most recent flare.
+
+The right panel displays app info and diagnostic information.
+-Active mode: Which mode is currently active is enlarged and green.
+-Flare Mode Unlocked: Each model is trained on data from a specific part of a flare. Should the application be opened during the impulsive phase or a double peak flare occur, the models will likely be making predictions based on data that does not correspond with what they were trained on! How much this effects prediction accuracy is unknown. Three consecutive decreases in XRSB flux must be observed before flare mode is unlocked. Otherwise, the app will remain in standby mode.
+-Current Satellite: The satellite the most recent datapoint is from (will probably be 19)
+-UTC Timestamp of the latest successful GOES data retrieval time
+-UTC timestamp of the latest flare start
+-3 Latest Data Delay Times: Difference between the last three data points being received.
+
+Artifacts are saved in the following directory structure:
+-Artifacts (created in the folder containing App.py)
+--Folder with the start time of the app
+---7-day flux history JSON (saved at the end of each flare)
+---Folder for each flare event
+----Prediction history (-5 - 15) minutes since flare start CSV with class probabilities
+----Graph of XRSA and XRSB flux history at the end of the flare, saved as PNG
+
+Other Fun Things To Know:
+-This program is written with the backend contained in App.py, which will report predictions at the terminal as print statements. This can be useful for debugging issues with the application and isolating whether issues are on the backend or frontend.
+-There are several optional arguments that can be used by manually changing Boolean variables in App.py when initializing the main class.
+--use_test_flux: If True, a JSON file oof flux history during an M2 flare will be used as input instead of live data.
+--print_output: If True, will print predictions and other output to the terminal.
+--use_secondary_source: If True, will use the secondary GOES satellite. If False, will use the primary.
+When running App.py (the command line version), it's recommended to use (use_test_flux=False, print_output=True, use_secondary_souce=False).
+When running GUI.py, it's recommended to use (use_test_flux=False, print_output=False, use_secondary_souce=False) - these are the default args.
