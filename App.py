@@ -130,7 +130,7 @@ class LiveApp:
         """Load prediction models"""
         self.models = {}
         for minutes_since_start in range(-5, 16):
-            model_path = os.path.join(f"Models/trained_{minutes_since_start}_minutes_since_start")
+            model_path = os.path.join(f"Models", f"trained_{minutes_since_start}_minutes_since_start")
             with open(model_path, 'rb') as f:
                 self.models[minutes_since_start] = pickle.load(f)
 
