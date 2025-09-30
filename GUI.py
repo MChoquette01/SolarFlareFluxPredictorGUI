@@ -323,7 +323,7 @@ if __name__ == '__main__':
     psg.theme("Reddit")
     window = psg.Window('Probably SVEN or MATTIAS, We\'ll See', layout, icon='sven.ico', resizable=True, finalize=True)
 
-    l = App.LiveApp(use_test_flux=True, print_output=False, use_secondary_source=False)
+    l = App.LiveApp(use_test_flux=False, print_output=False, use_secondary_source=False)
     # window['predictions'].update(format_prediction_string(stop_minute=-3))
     update_current_table()
     l.in_standby_mode = True
