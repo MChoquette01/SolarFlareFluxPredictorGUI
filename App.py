@@ -111,7 +111,7 @@ class LiveApp:
         """Save 7-day flux history from NOAA/GOES"""
         # save off 7-day JSON flux
         out_dir = os.path.join("Artifacts", self.app_start_time)
-        resp = requests.get(self.six_hour_flux_url)
+        resp = requests.get(self.seven_day_flux_url)
         with open(os.path.join(out_dir, "xrays-7-day.json"), 'w') as f:
             json.dump(json.loads(resp.content.decode()), f, indent=4)
 
