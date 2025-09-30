@@ -234,6 +234,11 @@ def update_gui(window):
     if l.use_test_flux:
         window["TestModeText"].update("Test Mode is enabled - using test data!\nSomeone probably did this manually in App.py!")
 
+    if l.is_satellite_online:
+        window["is_satellite_online"].update("", font=("Helvetica", 10), text_color='black')
+    else:
+        window["is_satellite_online"].update(f"GOES-{l.satellite} IS OFFLINE!", font=("Helvetica", 18, "bold"), text_color='red')
+
 
 def show_help():
     """Show help dialog"""
@@ -254,6 +259,8 @@ def show_help():
     window.close()
 
 # All the stuff inside your window.
+satellite_status_column = [[psg.Text("", font=("Helvetica", 10, "bold"), key="is_satellite_online", background_color='white', text_color='black')]]
+
 # column_1 = [[psg.Text("Predictions will be here!", key='predictions', font=("Helvetica", 14), background_color='white', text_color='black')]]
 column_1 = [[psg.Text("Live Predictions", font=("Helvetica", 18, "bold"), background_color='white', text_color='black')],
             [psg.Table([[]*4],
@@ -295,7 +302,8 @@ column_3 = [[psg.Text("Warmup", key="WarmupText", tooltip="Initialize app and pr
             [psg.Text("", key="TestModeText", background_color='white', text_color='black')],
             [psg.Button("Help", key="Help")]]
 
-layout = [[[psg.Canvas(key='controls_cv')], psg.Canvas(size=(1000, 500), key='canvas')],
+layout = [[[psg.Column(satellite_status_column, justification='center', expand_x=True, pad=(0, 0), element_justification='center', background_color='white')],
+         [psg.Canvas(key='controls_cv')], psg.Canvas(size=(1000, 500), key='canvas')],
          [psg.Column(column_1, expand_x=True, pad=(0, 0), element_justification='center', background_color='white'),
           psg.Column(column_2, expand_x=True, pad=(0, 0), element_justification='center', background_color='white'),
           psg.Column(column_3, expand_x=True, pad=(0, 0), element_justification='right', background_color='white')]]
@@ -315,7 +323,7 @@ if __name__ == '__main__':
     psg.theme("Reddit")
     window = psg.Window('Probably SVEN or MATTIAS, We\'ll See', layout, icon='sven.ico', resizable=True, finalize=True)
 
-    l = App.LiveApp(use_test_flux=False, print_output=False, use_secondary_source=False)
+    l = App.LiveApp(use_test_flux=True, print_output=False, use_secondary_source=False)
     # window['predictions'].update(format_prediction_string(stop_minute=-3))
     update_current_table()
     l.in_standby_mode = True

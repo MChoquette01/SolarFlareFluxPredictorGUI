@@ -91,9 +91,11 @@ class LiveApp:
             self.offset = -20
 
         self.satellite = None  # active GOES satellite
+        self.is_satellite_online = False  # True when the satellite is reporting valid (non-zero XRS) data
 
         # in theory only need to be 21 (number of models), but still can be left with 21 NaN values in input data
-        self.MINUTES_OF_DATA_TO_KEEP = 50
+        # Settings to 8 hours (6 hour launch window + 2 hour warm-up time)
+        self.MINUTES_OF_DATA_TO_KEEP = 60 * 8
 
         self.flare_mode_unlocked = False  # are we allowed to go into flare mode?
 
@@ -116,7 +118,7 @@ class LiveApp:
             json.dump(json.loads(resp.content.decode()), f, indent=4)
 
     def load_flux(self):
-        """Read data, either live or froma  test JSON"""
+        """Read data, either live or from a test JSON"""
         if self.use_test_flux:
             flux_subset_filepath = r"test_flux.json"
             with open(flux_subset_filepath, 'rb') as f:
@@ -153,8 +155,14 @@ class LiveApp:
         self.real_data_timestamps = self.real_data_timestamps[:self.MINUTES_OF_DATA_TO_KEEP]
         self.timestamps = self.timestamps[:self.MINUTES_OF_DATA_TO_KEEP]
 
+    def handle_none_datum(self, datum_name):
+        """Handle the case where there is no good data - say if GOES drops out"""
+        self.input_data[datum_name].insert(0, None)
+        self.last_good_param[datum_name] += 1
+        self.last_value_is_good[datum_name] = False
+
     def update_live_data(self, expected_time_tag):
-        """Read in teh next data point and parse it for derived datums"""
+        """Read in the next data point and parse it for derived datums"""
         xrsa_data_appended = False
         xrsb_data_appended = False
 
@@ -176,30 +184,34 @@ class LiveApp:
             # check for expected newest time tag
             for datum in datums:
                 if datum['energy'] == "0.05-0.4nm":  # XRSA
-                    self.input_data["XRSA_flux"].insert(0, datum['observed_flux'])
+                    if datum['observed_flux'] != 0:
+                        self.input_data["XRSA_flux"].insert(0, datum['observed_flux'])
+                    else:
+                        self.handle_none_datum("XRSA_flux")
                     for n in range(1, 6):
                         if datum['observed_flux'] is not None and datum['observed_flux'] != 0 and self.input_data['XRSA_flux'][n] is not None:
+                            self.is_satellite_online = True
                             self.input_data[f"XRSA_flux_{n}_minute_difference"].insert(0, datum['observed_flux'] -
                                                                                        self.input_data["XRSA_flux"][n])
                             self.last_value_is_good[f"XRSA_flux_{n}_minute_difference"] = True
                         else:
-                            self.input_data[f"XRSA_flux_{n}_minute_difference"].insert(0, None)
-                            self.last_good_param[f"XRSA_flux_{n}_minute_difference"] += 1
-                            self.last_value_is_good[f"XRSA_flux_{n}_minute_difference"] = False
+                            self.is_satellite_online = False
+                            self.handle_none_datum(f"XRSA_flux_{n}_minute_difference")
                     if self.print_output:
                         print(f"Read XRSA at {datum['time_tag']}")
                     xrsa_data_appended = True
                 if datum['energy'] == "0.1-0.8nm":  # XRSB
-                    self.input_data["XRSB_flux"].insert(0, datum['observed_flux'])
+                    if datum['observed_flux'] != 0:
+                        self.input_data["XRSB_flux"].insert(0, datum['observed_flux'])
+                    else:
+                        self.handle_none_datum("XRSB_flux")
                     for n in range(1, 6):
                         if datum['observed_flux'] is not None and datum['observed_flux'] != 0 and self.input_data['XRSB_flux'][n] is not None:
                             self.input_data[f"XRSB_flux_{n}_minute_difference"].insert(0, datum['observed_flux'] -
                                                                                        self.input_data["XRSB_flux"][n])
                             self.last_value_is_good[f"XRSB_flux_{n}_minute_difference"] = True
                         else:
-                            self.input_data[f"XRSB_flux_{n}_minute_difference"].insert(0, None)
-                            self.last_good_param[f"XRSB_flux_{n}_minute_difference"] += 1
-                            self.last_value_is_good[f"XRSB_flux_{n}_minute_difference"] = False
+                            self.handle_none_datum(f"XRSB_flux_{n}_minute_difference")
                     # arbitrarily update satellite here
                     self.satellite = datum['satellite']
                     if self.print_output:
@@ -212,69 +224,66 @@ class LiveApp:
             print(f"Time since last datapoint collection: {(self.real_data_timestamps[0] - self.real_data_timestamps[1]).total_seconds()} seconds")
 
         # Temperature/Emission Measure
-        em, temp = emt.compute_goes_emission_measure(xrsa_data=self.input_data[f"XRSA_flux"][0],
-                                                     xrsb_data=self.input_data[f"XRSB_flux"][0],
-                                                     goes_sat=self.satellite)
-        if not math.isnan(temp[0]) and temp[0] is not None:
-            self.input_data["Temperature"].insert(0, temp[0])
-            self.last_value_is_good["Temperature"] = True
+        if self.input_data['XRSA_flux'][0] is not None and self.input_data['XRSB_flux'][0] is not None:
+            em, temp = emt.compute_goes_emission_measure(xrsa_data=self.input_data[f"XRSA_flux"][0],
+                                                         xrsb_data=self.input_data[f"XRSB_flux"][0],
+                                                         goes_sat=self.satellite)
+            if not math.isnan(temp[0]) and temp[0] is not None:
+                self.input_data["Temperature"].insert(0, temp[0])
+                self.last_value_is_good["Temperature"] = True
+            else:
+                self.handle_none_datum("Temperature")
+
+            if not math.isnan(em[0]) and em[0] is not None:
+                self.input_data[f"EmissionMeasure"].insert(0, em[0] / 10 ** 30)
+                self.last_value_is_good["EmissionMeasure"] = True
+            else:
+                self.handle_none_datum("EmissionMeasure")
+
+            for n in range(1, 6):
+                em_n_minute_diff, temp_n_minute_diff = emt.compute_goes_emission_measure(
+                    xrsa_data=self.input_data[f"XRSA_flux_{n}_minute_difference"][0],
+                    xrsb_data=self.input_data[f"XRSB_flux_{n}_minute_difference"][0],
+                    goes_sat=self.satellite)
+                if not math.isnan(em_n_minute_diff[0]) and em_n_minute_diff[0] is not None:
+                    self.input_data[f"EmissionMeasure_{n}_minute_from_xrs_difference"].insert(0,
+                                                                                              em_n_minute_diff[
+                                                                                                  0] / 10 ** 30)
+                    self.last_value_is_good[f"EmissionMeasure_{n}_minute_from_xrs_difference"] = True
+                else:
+                    self.handle_none_datum(f"EmissionMeasure_{n}_minute_from_xrs_difference")
+
+                if not math.isnan(temp_n_minute_diff[0]) and temp_n_minute_diff[0] is not None:
+                    self.input_data[f"Temperature_{n}_minute_from_xrs_difference"].insert(0,
+                                                                                          temp_n_minute_diff[0])
+                    self.last_value_is_good[f"Temperature_{n}_minute_from_xrs_difference"] = True
+                else:
+                    self.handle_none_datum(f"Temperature_{n}_minute_from_xrs_difference")
+
+            # Non-XRS Differences
+            for n in range(1, 6):
+                if self.input_data['Temperature'][0] is not None and self.input_data['Temperature'][n] is not None:
+                    self.input_data[f"Temperature_{n}_minute_difference"].insert(0,
+                                                                                 self.input_data['Temperature'][0] -
+                                                                                 self.input_data['Temperature'][n])
+                    self.last_value_is_good[f"Temperature_{n}_minute_difference"] = True
+                else:
+                    self.handle_none_datum(f"Temperature_{n}_minute_difference")
+
+                if self.input_data['EmissionMeasure'][0] is not None and self.input_data['EmissionMeasure'][n] is not None:
+                    self.input_data[f"EmissionMeasure_{n}_minute_difference"].insert(0, self.input_data['EmissionMeasure'][0] - self.input_data['EmissionMeasure'][n])
+                    self.last_value_is_good[f"EmissionMeasure_{n}_minute_difference"] = True
+                else:
+                    self.handle_none_datum(f"EmissionMeasure_{n}_minute_difference")
+
         else:
-            self.input_data["Temperature"].insert(0, None)
-            self.last_good_param["Temperature"] += 1
-            self.last_value_is_good["Temperature"] = False
-
-        if not math.isnan(em[0]) and em[0] is not None:
-            self.input_data[f"EmissionMeasure"].insert(0, em[0] / 10 ** 30)
-            self.last_value_is_good["EmissionMeasure"] = True
-        else:
-            self.input_data[f"EmissionMeasure"].insert(0, None)
-            self.last_good_param["EmissionMeasure"] += 1
-            self.last_value_is_good["EmissionMeasure"] = False
-
-        for n in range(1, 6):
-            em_n_minute_diff, temp_n_minute_diff = emt.compute_goes_emission_measure(
-                xrsa_data=self.input_data[f"XRSA_flux_{n}_minute_difference"][0],
-                xrsb_data=self.input_data[f"XRSB_flux_{n}_minute_difference"][0],
-                goes_sat=self.satellite)
-
-            if not math.isnan(em_n_minute_diff[0]) and em_n_minute_diff[0] is not None:
-                self.input_data[f"EmissionMeasure_{n}_minute_from_xrs_difference"].insert(0,
-                                                                                          em_n_minute_diff[
-                                                                                              0] / 10 ** 30)
-                self.last_value_is_good[f"EmissionMeasure_{n}_minute_from_xrs_difference"] = True
-            else:
-                self.input_data[f"EmissionMeasure_{n}_minute_from_xrs_difference"].insert(0, None)
-                self.last_good_param[f"EmissionMeasure_{n}_minute_from_xrs_difference"] += 1
-                self.last_value_is_good[f"EmissionMeasure_{n}_minute_from_xrs_difference"] = False
-
-            if not math.isnan(temp_n_minute_diff[0]) and temp_n_minute_diff[0] is not None:
-                self.input_data[f"Temperature_{n}_minute_from_xrs_difference"].insert(0,
-                                                                                      temp_n_minute_diff[0])
-                self.last_value_is_good[f"Temperature_{n}_minute_from_xrs_difference"] = True
-            else:
-                self.input_data[f"Temperature_{n}_minute_from_xrs_difference"].insert(0, None)
-                self.last_good_param[f"Temperature_{n}_minute_from_xrs_difference"] += 1
-                self.last_value_is_good[f"Temperature_{n}_minute_from_xrs_difference"] = False
-
-        # Non-XRS Differences
-        for n in range(1, 6):
-            if self.input_data['Temperature'][0] is not None and self.input_data['Temperature'][n] is not None:
-                self.input_data[f"Temperature_{n}_minute_difference"].insert(0,
-                                                                             self.input_data['Temperature'][0] -
-                                                                             self.input_data['Temperature'][n])
-                self.last_value_is_good[f"Temperature_{n}_minute_difference"] = True
-            else:
-                self.input_data[f"Temperature_{n}_minute_difference"].insert(0, None)
-                self.last_good_param[f"Temperature_{n}_minute_difference"] += 1
-                self.last_value_is_good[f"Temperature_{n}_minute_difference"] = False
-
-            if self.input_data['EmissionMeasure'][0] is not None and self.input_data['EmissionMeasure'][n] is not None:
-                self.input_data[f"EmissionMeasure_{n}_minute_difference"].insert(0, self.input_data['EmissionMeasure'][0] - self.input_data['EmissionMeasure'][n])
-                self.last_value_is_good[f"EmissionMeasure_{n}_minute_difference"] = True
-            else:
-                self.input_data[f"EmissionMeasure_{n}_minute_difference"].insert(0, None)
-                self.last_good_param[f"EmissionMeasure_{n}_minute_difference"] += 1
-                self.last_value_is_good[f"EmissionMeasure_{n}_minute_difference"] = False
+            self.handle_none_datum("Temperature")
+            self.handle_none_datum("EmissionMeasure")
+            for n in range(1, 6):
+                self.handle_none_datum(f"Temperature_{n}_minute_from_xrs_difference")
+                self.handle_none_datum(f"EmissionMeasure_{n}_minute_from_xrs_difference")
+                self.handle_none_datum(f"Temperature_{n}_minute_difference")
+                self.handle_none_datum(f"EmissionMeasure_{n}_minute_difference")
 
         # check if linear interpolation is needed
         for param in self.params:
